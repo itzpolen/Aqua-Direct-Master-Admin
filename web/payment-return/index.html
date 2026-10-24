@@ -1,0 +1,361 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#f4f6f9">
+  <meta name="color-scheme" content="light">
+  <title>Payment Status</title>
+
+  <style>
+    :root {
+      --font: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        Roboto, "Helvetica Neue", Arial, sans-serif;
+      --ink: #111827;
+      --body: #4b5563;
+      --muted: #6b7280;
+      --line: #e5e7eb;
+      --page: #f4f6f9;
+      --brand: #1d4ed8;
+      --brand-dark: #1e40af;
+    }
+
+    * { box-sizing: border-box; }
+
+    html { -webkit-text-size-adjust: 100%; }
+
+    body {
+      min-height: 100vh;
+      min-height: 100svh;
+      margin: 0;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 24px 16px;
+      font-family: var(--font);
+      color: var(--ink);
+      background: var(--page);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body.success { --accent: #15803d; --tint: #ecfdf3; --edge: #bbf7d0; }
+    body.failed,
+    body.cancel  { --accent: #b91c1c; --tint: #fef2f2; --edge: #fecaca; }
+    body.unknown { --accent: #475569; --tint: #f1f5f9; --edge: #cbd5e1; }
+
+    .card {
+      width: 100%;
+      max-width: 440px;
+      overflow: hidden;
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      box-shadow: 0 1px 2px rgba(16, 24, 40, .04),
+        0 12px 32px rgba(16, 24, 40, .07);
+      animation: enter .4s ease-out both;
+    }
+
+    .accent-bar { height: 4px; background: var(--accent); }
+
+    .card-body {
+      padding: 36px 32px 28px;
+      text-align: center;
+    }
+
+    .icon {
+      width: 64px;
+      height: 64px;
+      margin: 0 auto 22px;
+      display: grid;
+      place-items: center;
+      border-radius: 50%;
+      color: var(--accent);
+      background: var(--tint);
+      box-shadow: 0 0 0 6px var(--tint), 0 0 0 7px var(--edge);
+    }
+
+    .icon svg { width: 30px; height: 30px; }
+
+    .icon .draw {
+      fill: none;
+      stroke: currentColor;
+      stroke-width: 2.6;
+      stroke-linecap: round;
+      stroke-linejoin: round;
+      stroke-dasharray: 48;
+      stroke-dashoffset: 48;
+      animation: draw .5s .2s ease-out forwards;
+    }
+
+    .status {
+      margin: 0 0 8px;
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 24px;
+      line-height: 1.25;
+      font-weight: 650;
+      letter-spacing: -.01em;
+    }
+
+    .message {
+      margin: 12px auto 0;
+      max-width: 340px;
+      color: var(--body);
+      font-size: 15px;
+      line-height: 1.6;
+    }
+
+    .details {
+      margin: 26px 0 0;
+      padding: 0;
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      background: #fafbfc;
+      text-align: left;
+    }
+
+    .row {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 13px 16px;
+      font-size: 14px;
+    }
+
+    .row + .row { border-top: 1px solid var(--line); }
+
+    .row dt { margin: 0; color: var(--muted); flex: none; }
+
+    .row dd {
+      margin: 0;
+      min-width: 0;
+      color: var(--ink);
+      font-weight: 600;
+      text-align: right;
+      overflow-wrap: anywhere;
+    }
+
+    .row dd.ref {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 13px;
+    }
+
+    .row dd.state { color: var(--accent); }
+
+    .notice {
+      margin: 18px 0 0;
+      color: var(--muted);
+      font-size: 13px;
+      line-height: 1.6;
+      text-align: left;
+    }
+
+    .notice strong { color: var(--body); font-weight: 600; }
+
+    .actions { margin-top: 26px; }
+
+    .primary {
+      width: 100%;
+      min-height: 48px;
+      padding: 0 20px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border-radius: 10px;
+      color: #fff;
+      background: var(--brand);
+      font-family: inherit;
+      font-size: 15px;
+      font-weight: 600;
+      text-decoration: none;
+      transition: background .15s ease, box-shadow .15s ease;
+    }
+
+    .primary:hover { background: var(--brand-dark); }
+
+    .primary:focus-visible {
+      outline: 3px solid rgba(29, 78, 216, .35);
+      outline-offset: 2px;
+    }
+
+    .primary svg { width: 18px; height: 18px; }
+
+    .card-foot {
+      padding: 14px 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      border-top: 1px solid var(--line);
+      background: #fafbfc;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .card-foot svg { width: 14px; height: 14px; color: #15803d; flex: none; }
+
+    @keyframes enter {
+      from { opacity: 0; transform: translateY(10px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    @keyframes draw { to { stroke-dashoffset: 0; } }
+
+    @media (max-width: 420px) {
+      .card-body { padding: 30px 20px 22px; }
+      h1 { font-size: 22px; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+      }
+    }
+  </style>
+</head>
+
+<body class="unknown">
+  <main class="card" aria-live="polite">
+    <div class="accent-bar"></div>
+
+    <div class="card-body">
+      <div class="icon" aria-hidden="true">
+        <svg id="status-icon" viewBox="0 0 32 32" fill="none">
+          <path class="draw" d="m8 17 6 6 11-12"/>
+        </svg>
+      </div>
+
+      <p class="status" id="status-label">Payment status</p>
+      <h1 id="title">Checking your payment</h1>
+      <p class="message" id="message">
+        Return to the app to check your order status.
+      </p>
+
+      <dl class="details">
+        <div class="row">
+          <dt>Status</dt>
+          <dd class="state" id="state-text">Pending</dd>
+        </div>
+        <div class="row" id="order-row" hidden>
+          <dt>Order reference</dt>
+          <dd class="ref" id="order-id"></dd>
+        </div>
+      </dl>
+
+      <p class="notice" id="notice-text"></p>
+
+      <div class="actions">
+        <a class="primary" id="return-link" href="aquadirect://payment-return/home">
+          <span id="button-text">Return to the app</span>
+          <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M5 12h14m-6-6 6 6-6 6" stroke="currentColor"
+              stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          </svg>
+        </a>
+      </div>
+    </div>
+
+    <div class="card-foot">
+      <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+        <rect x="5" y="11" width="14" height="9" rx="2" stroke="currentColor" stroke-width="2"/>
+        <path d="M8 11V8a4 4 0 0 1 8 0v3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+      </svg>
+      Encrypted and secure payment processing
+    </div>
+  </main>
+
+  <script>
+    (() => {
+      const params = new URLSearchParams(window.location.search);
+      const status = (params.get("status") || "").toLowerCase();
+      const orderId = params.get("order_id");
+
+      const $ = (id) => document.getElementById(id);
+
+      // Keep the app deep link and carry the order reference with it.
+      const appUrl = new URL("aquadirect://payment-return/home");
+      if (orderId) appUrl.searchParams.set("order_id", orderId);
+      $("return-link").href = appUrl.toString();
+
+      if (orderId) {
+        $("order-row").hidden = false;
+        $("order-id").textContent = orderId;
+      }
+
+      const icons = {
+        success: '<path class="draw" d="m8 17 6 6 11-12"/>',
+        failed: '<path class="draw" d="m10 10 12 12m0-12L10 22"/>',
+        cancel: '<path class="draw" d="m10 10 12 12m0-12L10 22"/>',
+        unknown: '<path class="draw" d="M16 9v8m0 6h.01"/>'
+      };
+
+      const states = {
+        success: {
+          className: "success",
+          label: "Payment received",
+          state: "Verifying",
+          title: "Thank you, your payment was submitted",
+          message: "Your payment is being confirmed by our payment provider. Your order will update automatically once confirmation arrives.",
+          notice: "<strong>What happens next:</strong> You'll see the confirmed status in the app. This page does not mark the order as paid by itself.",
+          button: "Return to the app",
+          docTitle: "Payment Submitted"
+        },
+        failed: {
+          className: "failed",
+          label: "Payment unsuccessful",
+          state: "Not completed",
+          title: "We couldn't complete your payment",
+          message: "No payment was confirmed. You have not been charged for this attempt. You can try again or choose another payment method.",
+          notice: "<strong>Next step:</strong> Return to the app, open your order and try again.",
+          button: "Return to the app",
+          docTitle: "Payment Unsuccessful"
+        },
+        cancel: {
+          className: "cancel",
+          label: "Checkout cancelled",
+          state: "Cancelled",
+          title: "Your payment was cancelled",
+          message: "You left the checkout before paying, so no payment was made. Your order is still saved in the app.",
+          notice: "<strong>Changed your mind?</strong> Return to the app and open your order to choose a payment option.",
+          button: "Back to your order",
+          docTitle: "Payment Cancelled"
+        },
+        unknown: {
+          className: "unknown",
+          label: "Status unavailable",
+          state: "Unknown",
+          title: "Let's check your order",
+          message: "We couldn't read the checkout result from this page. Open the app to see the latest status of your order.",
+          notice: "<strong>For your security:</strong> only the verified status inside the app determines whether an order is paid.",
+          button: "Check order in the app",
+          docTitle: "Check Your Order"
+        }
+      };
+
+      const s = states[status] || states.unknown;
+      document.body.className = s.className;
+      document.title = s.docTitle;
+      $("status-label").textContent = s.label;
+      $("state-text").textContent = s.state;
+      $("title").textContent = s.title;
+      $("message").textContent = s.message;
+      $("notice-text").innerHTML = s.notice;
+      $("button-text").textContent = s.button;
+      $("status-icon").innerHTML = icons[s.className];
+    })();
+  </script>
+</body>
+</html>
