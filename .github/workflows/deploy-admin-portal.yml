@@ -26,6 +26,7 @@ jobs:
         with:
           node-version: 22
           cache: npm
+          cache-dependency-path: admin-portal/package-lock.json
 
       - name: Verify Supabase configuration
         env:
@@ -39,7 +40,7 @@ jobs:
         uses: actions/configure-pages@v5
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --prefix admin-portal
 
       - name: Build admin portal
         env:
@@ -51,12 +52,12 @@ jobs:
           else
             base_href="/${GITHUB_REPOSITORY#*/}/"
           fi
-          npm run build -- --base="$base_href"
+          npm run build --prefix admin-portal -- --base="$base_href"
 
       - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: dist
+          path: admin-portal/dist
 
   deploy:
     environment:
