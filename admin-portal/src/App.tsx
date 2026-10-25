@@ -51,6 +51,8 @@ interface DocRow {
   review_status: string;
   review_notes: string | null;
   required_for_verification: boolean;
+  expires_at: string | null;
+  is_current?: boolean;
   submitted_at: string;
 }
 
@@ -128,7 +130,7 @@ const pageCopy: Record<Section, { title: string; description: string }> = {
 
 const tableConfig: Record<Kind, { columns: string[]; statusKey: string; searchLabel: string }> = {
   applications: {
-    columns: ["display_name", "email", "city", "application_status", "created_at"],
+    columns: ["display_name", "email", "city", "application_status", "permit_renewal", "created_at"],
     statusKey: "application_status",
     searchLabel: "Search applications",
   },
@@ -174,6 +176,7 @@ const columnLabels: Record<string, string> = {
   publication_status: "Publication",
   operational_status: "Operation",
   application_status: "Application",
+  permit_renewal: "Permit renewal",
 };
 
 const moneyKeys = new Set(["total", "subtotal", "delivery_fee", "default_delivery_fee", "minimum_order_amount"]);
@@ -240,7 +243,7 @@ function toneOf(value: string) {
   const v = value.toLowerCase();
   if (["approved", "verified", "published", "active", "delivered", "paid", "succeeded"].includes(v)) return "green";
   if (["rejected", "cancelled", "failed", "suspended"].includes(v)) return "red";
-  if (["submitted", "in_review", "pending", "changes_requested", "onboarding", "processing"].includes(v)) return "amber";
+  if (["submitted", "in_review", "pending", "renewal_review", "changes_requested", "onboarding", "processing"].includes(v)) return "amber";
   if (["confirmed", "preparing", "ready", "rider_assigned", "out_for_delivery"].includes(v)) return "blue";
   return "gray";
 }
@@ -467,12 +470,61 @@ function Dashboard({ userEmail }: { userEmail: string }) {
         { name: "published station count", error: publishedCount.error },
       ]);
 
-      const [customerPermission, reviewPermission] = await Promise.all([
+      const reviewPermission = await supabase.rpc("has_permission", { required_permission: "station.review" });
+      if (reviewPermission.error) throw new Error(`Could not check station.review permission: ${reviewPermission.error.message}`);
+      let renewalApplicationIds: string[] = [];
+      if (reviewPermission.data === true) {
+        const pendingPermitRenewals = await supabase.from("station_documents")
+          .select("application_id")
+          .eq("document_type", "business_permit")
+          .eq("is_current", true)
+          .eq("review_status", "pending");
+        if (pendingPermitRenewals.error) {
+          throw new Error(`Could not load pending business permit renewals: ${pendingPermitRenewals.error.message}`);
+        }
+        renewalApplicationIds = [...new Set(
+          (pendingPermitRenewals.data ?? []).map((document) => document.application_id),
+        )];
+      }
+      const loadedApplications = applications.data ?? [];
+      const missingRenewalApplicationIds = renewalApplicationIds.filter(
+        (id) => !loadedApplications.some((application) => application.id === id),
+      );
+      const additionalRenewalApplications = missingRenewalApplicationIds.length > 0
+        ? await supabase.from("station_applications")
+          .select("id, display_name, legal_business_name, phone, email, address_line, barangay, city, province, application_status, verification_status, submitted_at, created_at")
+          .in("id", missingRenewalApplicationIds)
+        : { data: [], error: null };
+      if (additionalRenewalApplications.error) {
+        throw new Error(`Could not load applications with permit renewals: ${additionalRenewalApplications.error.message}`);
+      }
+      const applicationRows = [
+        ...loadedApplications,
+        ...(additionalRenewalApplications.data ?? []).filter(
+          (application) => application.application_status === "approved",
+        ),
+      ];
+      const approvedRenewalIds = new Set(
+        applicationRows
+          .filter((application) =>
+            application.application_status === "approved"
+            && renewalApplicationIds.includes(application.id),
+          )
+          .map((application) => application.id),
+      );
+      const adminApplicationRows = applicationRows
+        .map((application) => ({
+          ...application,
+          permit_renewal: approvedRenewalIds.has(application.id) ? "Review needed" : null,
+        }))
+        .sort((a, b) => Number(approvedRenewalIds.has(b.id)) - Number(approvedRenewalIds.has(a.id)));
+
+      const [customerPermission, reviewModerationPermission] = await Promise.all([
         supabase.rpc("has_permission", { required_permission: "customer.read" }),
         supabase.rpc("has_permission", { required_permission: "reviews.moderate" }),
       ]);
       if (customerPermission.error) throw new Error(`Could not check customer.read permission: ${customerPermission.error.message}`);
-      if (reviewPermission.error) throw new Error(`Could not check reviews.moderate permission: ${reviewPermission.error.message}`);
+      if (reviewModerationPermission.error) throw new Error(`Could not check reviews.moderate permission: ${reviewModerationPermission.error.message}`);
 
       const todayKey = manilaDateKey(new Date());
       const startDate = addDays(new Date(`${todayKey}T00:00:00Z`), -29);
@@ -726,7 +778,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
         (applicationAddresses.data ?? []).map((address) => [address.id, address]),
       );
       const next: DashboardData = {
-        applications: (applications.data ?? []) as Row[],
+        applications: adminApplicationRows as Row[],
         stations: stationRows.map((station) => {
           const address = addressesByApplicationId.get(station.application_id);
           return {
@@ -780,7 +832,7 @@ function Dashboard({ userEmail }: { userEmail: string }) {
           if (rating >= 1 && rating <= 5) distribution[rating - 1] += 1;
           return distribution;
         }, [0, 0, 0, 0, 0]),
-        canViewReviewDistribution: reviewPermission.data === true,
+        canViewReviewDistribution: reviewModerationPermission.data === true,
       };
       setData(next);
       setUpdatedAt(new Date());
@@ -2138,6 +2190,7 @@ function formatCell(column: string, value: Row[string]): ReactNode {
   if (column === "order_number") return `#${value}`;
   if (dateKeys.has(column)) return shortDate(String(value));
   if (moneyKeys.has(column)) return <span className="num">{money(Number(value))}</span>;
+  if (column === "permit_renewal") return <StatusChip value={String(value)} />;
   if (column.includes("status")) return <StatusChip value={String(value)} />;
   if (column === "payment_method") return <StatusChip neutral value={String(value) === "cod" ? "Cash on delivery" : String(value)} />;
   return String(value);
@@ -2297,6 +2350,7 @@ function ApplicationReview({ row, perms, onChanged }: { row: Row; perms: Permiss
   const id = String(row.id);
   const status = String(row.application_status);
   const reviewable = status === "submitted" || status === "in_review";
+  const permitRenewalReview = status === "approved";
   const [docs, setDocs] = useState<DocRow[] | null>(null);
   const [docError, setDocError] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -2304,7 +2358,7 @@ function ApplicationReview({ row, perms, onChanged }: { row: Row; perms: Permiss
 
   const loadDocs = useCallback(async () => {
     if (!supabase) return;
-    const columns = "id, document_type, storage_path, review_status, review_notes, required_for_verification, submitted_at";
+    const columns = "id, document_type, storage_path, review_status, review_notes, required_for_verification, expires_at, submitted_at";
     let rows: DocRow[] = [];
     let message: string | null = null;
     const current = await supabase.from("station_documents")
@@ -2315,12 +2369,7 @@ function ApplicationReview({ row, perms, onChanged }: { row: Row; perms: Permiss
     if (!current.error) {
       rows = (current.data ?? []) as unknown as DocRow[];
     } else {
-      const all = await supabase.from("station_documents")
-        .select(columns)
-        .eq("application_id", id)
-        .order("document_type");
-      if (all.error) message = all.error.message;
-      else rows = (all.data ?? []) as unknown as DocRow[];
+      message = current.error.message;
     }
     setDocError(message);
     setDocs(rows);
@@ -2330,8 +2379,13 @@ function ApplicationReview({ row, perms, onChanged }: { row: Row; perms: Permiss
     void loadDocs();
   }, [loadDocs]);
 
-  const required = (docs ?? []).filter((doc) => doc.required_for_verification);
+  const required = (docs ?? []).filter((doc) => doc.required_for_verification && doc.is_current !== false);
   const canApprove = required.length > 0 && required.every((doc) => doc.review_status === "approved");
+  const renewalPending = (docs ?? []).some((doc) =>
+    doc.document_type === "business_permit"
+    && doc.is_current !== false
+    && doc.review_status === "pending",
+  );
 
   async function openDocument(doc: DocRow) {
     if (!supabase) return;
@@ -2366,6 +2420,9 @@ function ApplicationReview({ row, perms, onChanged }: { row: Row; perms: Permiss
     }
     setResult({ kind: "success", text: `${sentence(doc.document_type)} marked ${sentence(decision).toLowerCase()}.` });
     await loadDocs();
+    if (permitRenewalReview && doc.document_type === "business_permit") {
+      await onChanged();
+    }
   }
 
   async function decide(decision: string, notes: string) {
@@ -2415,13 +2472,22 @@ function ApplicationReview({ row, perms, onChanged }: { row: Row; perms: Permiss
                   <span className="doc-icon"><FileText size={16} /></span>
                   <span className="doc-copy">
                     <strong>{sentence(doc.document_type)}</strong>
-                    <small>Uploaded {timeAgo(doc.submitted_at)}{doc.required_for_verification ? "" : " · Optional"}</small>
+                    <small>
+                      Uploaded {timeAgo(doc.submitted_at)}
+                      {doc.required_for_verification ? "" : " · Optional"}
+                      {doc.document_type === "business_permit" && doc.expires_at
+                        ? ` · Expires ${shortDate(doc.expires_at)}`
+                        : ""}
+                    </small>
                   </span>
-                  <StatusChip value={doc.review_status} />
+                  <StatusChip value={permitRenewalReview && doc.document_type === "business_permit" && doc.review_status === "pending" ? "renewal_review" : doc.review_status} />
                   <button className="icon-button" type="button" aria-label={`Open ${sentence(doc.document_type)}`} onClick={() => void openDocument(doc)}><ExternalLink size={15} /></button>
                 </div>
-                {doc.review_notes && <p className="doc-notes">{doc.review_notes}</p>}
-                {perms.review && reviewable && (
+                  {permitRenewalReview && doc.is_current !== false && doc.document_type === "business_permit" && doc.review_status === "pending" && (
+                    <p className="review-note">Renewed permit submitted. Review the replacement; the station remains approved.</p>
+                  )}
+                  {doc.review_notes && <p className="doc-notes">{doc.review_notes}</p>}
+                  {perms.review && doc.is_current !== false && (reviewable || (permitRenewalReview && doc.document_type === "business_permit" && doc.review_status === "pending")) && (
                   <DecisionPanel
                     compact
                     busy={busy === doc.id}
@@ -2444,11 +2510,19 @@ function ApplicationReview({ row, perms, onChanged }: { row: Row; perms: Permiss
         {!perms.review ? (
           <p className="review-note">Your account doesn't have permission to review applications.</p>
         ) : decisions.length === 0 ? (
-          <p className="review-note">No review actions are available for {sentence(status).toLowerCase()} applications.</p>
+          <p className="review-note">
+            {permitRenewalReview && renewalPending
+              ? "Review the pending business permit renewal above; the station remains approved."
+              : `No review actions are available for ${sentence(status).toLowerCase()} applications.`}
+          </p>
         ) : (
           <>
             <DecisionPanel busy={busy === "application"} noteLabel="Add a note for the station owner" actions={decisions} onConfirm={(decision, notes) => void decide(decision, notes)} />
-            {docs !== null && !canApprove && <p className="review-note">Approve every required document to enable approval.</p>}
+            {permitRenewalReview && renewalPending
+              ? <p className="review-note">Reviewing this renewal does not change the station's approved application status.</p>
+              : docs !== null && !canApprove
+                ? <p className="review-note">Approve every required document to enable approval.</p>
+                : null}
           </>
         )}
       </section>
